@@ -1,0 +1,23 @@
+{
+  "name": "rdt",
+  "version": "1.0.0",
+  "private": true,
+  "description": "I wanna reddit on the cli",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "type": "module",
+  "license": "ISC",
+  "dependencies": {
+    "commander": "^8.3.0",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "node-fetch": "^3.1.0",
+    "open": "^8.4.0"
+  },
+  "bin": {
+    "rdt": "./index.js"
+  }
+}
