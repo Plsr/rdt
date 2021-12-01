@@ -5,7 +5,8 @@ import fetch from 'node-fetch'
 import { Command } from 'commander';
 import express from "express"
 import open from "open"
-import { exec } from "child_process"
+import chalk from 'chalk'
+import Keychain, { REFRESH_TOKEN_KEY, ACCESS_TOKEN_KEY } from './Keychain.js';
 
 // Load dotenv config. Keep at top.
 dotenv.config()
@@ -16,12 +17,11 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET
 const USER_AGENT = process.env.USER_AGENT
 
 const STATE = (Math.random() + 1).toString(36).substring(7);
-const REFRESH_KEY = "rdt_refresh_token"
 const REDIRECT_URI = "http://localhost:7777/authorize_callback";
 let ACCESS_TOKEN = undefined
-const authorized = false
 
 const program = new Command();
+const keychain = new Keychain();
 let server
 
 program.option('-fr, --force-refresh', 'force new refresh token, only dev, delete me')
@@ -35,18 +35,16 @@ const msw_main = "https://reddit.com/r/mauerstrassenwetten.json"
  */
 
 const authNeeded = await isAuthNeeded()
-console.log(authNeeded)
 
 if (authNeeded) {
+  console.log(chalk.magenta("No auth data found, starting auth process..."))
   startServer()
   make_auth_request()
+} else {
+  const dailyLink = await getDaily()
+  const comments = await getDailyComments(dailyLink)
+  printComments(comments)
 }
-
-const dailyLink = await getDaily()
-const comments = await getDailyComments(dailyLink)
-printComments(comments)
-
-
 
 /**
  * END MAIN PROGRAM
@@ -55,7 +53,7 @@ printComments(comments)
 function printComments(comments) {
   comments.reverse().forEach(comment => {
     if (comment.data.stickied) return
-    
+
     const author = comment.data.author
     const createdAt = new Date(comment.data.created * 1000)
     const body = comment.data.body
@@ -96,14 +94,30 @@ async function getDaily() {
   return daily.data.url + '.json'
 }
 
+async function accessTokenValid() {
+  // TODO: How to do this?
+  return false
+}
+
 async function isAuthNeeded() {
+  if (options.forceRefresh) {
+    console.log(chalk.yellow('Running in force refresh mode, deleting stored keys and starting auth flow...'))
+    await deleteRefreshTokenFromKeychain()
+    return true
+  }
+
+  const accessToken = await keychain.getItem(ACCESS_TOKEN_KEY)
+
+  if (accessToken && await accessTokenValid()) {
+    ACCESS_TOKEN = accessToken
+    return false
+  }
+
   const refreshToken = await getRefreshTokenFromKeychain()
   console.log(refreshToken)
 
   if (!refreshToken) return true
 
-  // TODO: Also store access token to keychain
-  // Then check if it has expired on program run
   const accessToken = await getAccessToken(refreshToken.trim())
   if (accessToken) {
     console.log('got access token')
@@ -115,14 +129,8 @@ async function isAuthNeeded() {
   return true
 }
 
-function getRefreshTokenFromKeychain() {
-  const getCmd = `security find-generic-password -wa '${REFRESH_KEY}'`
-
-  return new Promise(resolve => {
-     exec(getCmd, (err, stout, sterr) => {
-        resolve(err ? sterr : stout)
-     })
-  });
+async function getRefreshTokenFromKeychain() {
+  return await keychain.getItem(REFRESH_TOKEN_KEY)
 }
 
 
@@ -149,40 +157,12 @@ async function getAccessToken(refreshToken) {
 }
 
 
-function deleteRefreshTokenFromKeychain() {
-  const delCmd = `security delete-generic-password -a '${REFRESH_KEY}' -s '${REFRESH_KEY}'`
-  exec(delCmd, (error, stdout, stderr) => {
-    if (error) {
-        console.log(`error: ${error.message}`);
-        return;
-    }
-    if (stderr) {
-        console.log(`stderr: ${stderr}`);
-        return;
-    }
-    console.log('Stored key deleted');
-  })
+async function deleteRefreshTokenFromKeychain() {
+  return await keychain.deleteItem(REFRESH_TOKEN_KEY)
 }
 
-function saveToken(token) {
-  if (options.forceRefresh) {
-    console.log('Force refresh mode, deleting stored key')
-    deleteRefreshTokenFromKeychain()
-  }
-
-  const cmd = `security add-generic-password -a '${REFRESH_KEY}' -s '${REFRESH_KEY}' -w '${token}'`
-  console.log(cmd)
-  exec(cmd, (error, stdout, stderr) => {
-    if (error) {
-        console.log(`error: ${error.message}`);
-        return;
-    }
-    if (stderr) {
-        console.log(`stderr: ${stderr}`);
-        return;
-    }
-    console.log('Stored refresh token in kaychain');
-  });
+async function saveToken(token) {
+  return await keychain.storeItem(REFRESH_TOKEN_KEY, token)
 }
 
 async function handleTokenRetrival(code, state) {
@@ -202,20 +182,26 @@ async function handleTokenRetrival(code, state) {
     'User-Agent': USER_AGENT,
     'Content-Type': 'application/x-www-form-urlencoded'
   }
-  console.log(headers)
-  console.log(body)
+
   const res = await fetch(url, {method: 'POST', body: body, headers: headers});
-  console.log(res.headers);
   const data = await res.json()
-  console.log(data)
+
   ACCESS_TOKEN = data['access_token']
   const refresh_token = data['refresh_token']
-  saveToken(refresh_token)
+
+  console.log(chalk.green("✔ Retrieved access & refresh token, saving to keychain"))
+
+  await keychain.storeItem(REFRESH_TOKEN_KEY, refresh_token)
+  await keychain.storeItem(ACCESS_TOKEN_KEY, ACCESS_TOKEN)
+
   stopServer()
 }
 
 function stopServer() {
-  server.close()
+  console.log(chalk.magenta("Shutting down auth server..."))
+  server.close(() => {
+    console.log(chalk.magenta("...shut down."))
+  })
 }
 
 function startServer() {
@@ -223,14 +209,14 @@ function startServer() {
   const app = express()
 
   server = app.listen(port, () => {
-      console.log(`Server is running on http://localhost:${port}`);
+      console.log(chalk.magenta(`Auth callback server is running on http://localhost:${port}`));
   });
 
   app.get('/authorize_callback', (req, res) => {
-    console.log(req.query['code'])
     if (req.query['code'] && req.query['state']) {
       const code = req.query['code']
       const state = req.query['state']
+      console.log(chalk.magenta("Retrieved callback, retrieving access token..."))
       handleTokenRetrival(code, state)
     }
   })
@@ -243,5 +229,7 @@ function make_auth_request() {
   const scope = "mysubreddits"
 
   const auth_url = `https://www.reddit.com/api/v1/authorize?client_id=${CLIENT_ID}&response_type=${response_type}&state=${STATE}&redirect_uri=${REDIRECT_URI}&duration=${duration}&scope=${scope}`
+
+  console.log(chalk.magenta('Opening browser window...'))
   open(auth_url)
 }
