@@ -42,9 +42,59 @@ if (authNeeded) {
   make_auth_request()
 }
 
+const dailyLink = await getDaily()
+const comments = await getDailyComments(dailyLink)
+printComments(comments)
+
+
+
 /**
  * END MAIN PROGRAM
  */
+
+function printComments(comments) {
+  comments.reverse().forEach(comment => {
+    if (comment.data.stickied) return
+    
+    const author = comment.data.author
+    const createdAt = new Date(comment.data.created * 1000)
+    const body = comment.data.body
+
+    console.log('[' + author + '         ' + createdAt + ']')
+    console.log(body)
+    console.log('')
+
+  })
+}
+
+async function getDailyComments(dailyLink) {
+  const headers = {
+    'Authorization': 'bearer ' + ACCESS_TOKEN,
+    'User-Agent': USER_AGENT,
+    'Content-Type': 'application/x-www-form-urlencoded'
+  }
+  const res = await fetch(dailyLink, headers)
+  const data = await res.json()
+  const comments = data[1].data.children
+  console.log(comments)
+  return comments
+}
+
+async function getDaily() {
+  const headers = {
+    'Authorization': 'bearer ' + ACCESS_TOKEN,
+    'User-Agent': USER_AGENT,
+    'Content-Type': 'application/x-www-form-urlencoded'
+  }
+  const res = await fetch(msw_main, headers)
+  const data = await res.json()
+  const children = data.data.children
+  const daily = children.find(post => {
+    return post.data.title.includes("Tägliche Diskussion")
+  })
+  console.log(daily.data.url)
+  return daily.data.url + '.json'
+}
 
 async function isAuthNeeded() {
   const refreshToken = await getRefreshTokenFromKeychain()
@@ -52,6 +102,8 @@ async function isAuthNeeded() {
 
   if (!refreshToken) return true
 
+  // TODO: Also store access token to keychain
+  // Then check if it has expired on program run
   const accessToken = await getAccessToken(refreshToken.trim())
   if (accessToken) {
     console.log('got access token')
