@@ -7,6 +7,7 @@ import express from "express"
 import open from "open"
 import chalk from 'chalk'
 import Keychain, { REFRESH_TOKEN_KEY, ACCESS_TOKEN_KEY } from './Keychain.js';
+import { isWeekend } from 'date-fns'
 
 // Load dotenv config. Keep at top.
 dotenv.config()
@@ -43,7 +44,7 @@ if (authNeeded) {
 } else {
   const dailyLink = await getDaily()
   const comments = await getDailyComments(dailyLink)
-  printComments(comments)
+  printComments(comments.slice(0, 20))
 }
 
 /**
@@ -74,7 +75,6 @@ async function getDailyComments(dailyLink) {
   const res = await fetch(dailyLink, headers)
   const data = await res.json()
   const comments = data[1].data.children
-  console.log(comments)
   return comments
 }
 
@@ -88,9 +88,8 @@ async function getDaily() {
   const data = await res.json()
   const children = data.data.children
   const daily = children.find(post => {
-    return post.data.title.includes("Tägliche Diskussion")
+    return post.data.title.includes(dailyRegex())
   })
-  console.log(daily.data.url)
   return daily.data.url + '.json'
 }
 
@@ -114,15 +113,11 @@ async function isAuthNeeded() {
   }
 
   const refreshToken = await getRefreshTokenFromKeychain()
-  console.log(refreshToken)
-
   if (!refreshToken) return true
 
-  const accessToken = await getAccessToken(refreshToken.trim())
-  if (accessToken) {
-    console.log('got access token')
-    console.log(accessToken)
-    ACCESS_TOKEN = accessToken
+  const freshAccessToken = await getAccessToken(refreshToken.trim())
+  if (freshAccessToken) {
+    ACCESS_TOKEN = freshAccessToken
     return false
   }
 
@@ -135,7 +130,6 @@ async function getRefreshTokenFromKeychain() {
 
 
 async function getAccessToken(refreshToken) {
-  console.log("Getting access token from refresh token")
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
@@ -147,11 +141,8 @@ async function getAccessToken(refreshToken) {
     'User-Agent': USER_AGENT,
     'Content-Type': 'application/x-www-form-urlencoded'
   }
-  console.log(headers)
-  console.log(body)
   const res = await fetch(url, {method: 'POST', body: body, headers: headers});
   const data = await res.json()
-  console.log(data)
   const accessToken = data['access_token']
   return accessToken
 }
@@ -232,4 +223,11 @@ function make_auth_request() {
 
   console.log(chalk.magenta('Opening browser window...'))
   open(auth_url)
+}
+
+function dailyRegex() {
+  const regularDaily = 'Tägliche Diskussion'
+  const weekendThread = 'Eure Pläne für Montag'
+
+  return isWeekend(new Date) ? weekendThread : regularDaily
 }
