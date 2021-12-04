@@ -8,6 +8,7 @@ import open from "open"
 import chalk from 'chalk'
 import Keychain, { REFRESH_TOKEN_KEY, ACCESS_TOKEN_KEY } from './Keychain.js';
 import { isWeekend } from 'date-fns'
+import { printComments } from './Comments.js'
 
 // Load dotenv config. Keep at top.
 dotenv.config()
@@ -50,21 +51,6 @@ if (authNeeded) {
 /**
  * END MAIN PROGRAM
  */
-
-function printComments(comments) {
-  comments.reverse().forEach(comment => {
-    if (comment.data.stickied) return
-
-    const author = comment.data.author
-    const createdAt = new Date(comment.data.created * 1000)
-    const body = comment.data.body
-
-    console.log('[' + author + '         ' + createdAt + ']')
-    console.log(body)
-    console.log('')
-
-  })
-}
 
 async function getDailyComments(dailyLink) {
   const headers = {
