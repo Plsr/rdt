@@ -8,7 +8,7 @@ import open from "open"
 import chalk from 'chalk'
 import Keychain, { REFRESH_TOKEN_KEY, ACCESS_TOKEN_KEY } from './Keychain.js';
 import { isWeekend } from 'date-fns'
-import { printComments } from './Comments.js'
+import Comments from './Comments.js'
 
 // Load dotenv config. Keep at top.
 dotenv.config()
@@ -27,6 +27,7 @@ const keychain = new Keychain();
 let server
 
 program.option('-fr, --force-refresh', 'force new refresh token, only dev, delete me')
+program.option('-s, --stream', 'Stream new comments as they arrive')
 program.parse();
 const options = program.opts();
 
@@ -44,8 +45,16 @@ if (authNeeded) {
   make_auth_request()
 } else {
   const dailyLink = await getDaily()
-  const comments = await getDailyComments(dailyLink)
-  printComments(comments.slice(0, 20))
+  const comments = new Comments((await getDailyComments(dailyLink)).slice(0, 20))
+  comments.printComments()
+
+  if (options.stream) {
+    const interval = setInterval(async () => {
+      const newComments = (await getDailyComments(dailyLink)).slice(0, 20)
+      comments.addComments(newComments)
+      comments.printComments()
+    }, 60000);
+  }
 }
 
 /**
